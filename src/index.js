@@ -44,21 +44,32 @@ const rateLimitStore = new Map();
 // Ghost webhook signature verification
 const verifyGhostSignature = async (signature, body, secret) => {
   try {
+    console.log(`DEBUG: Ghost signature received: "${signature}"`);
+    console.log(`DEBUG: Body length: ${body.length}`);
+    console.log(`DEBUG: Secret length: ${secret.length}`);
+    
     // Ghost signature format: "sha256=hash, t=timestamp"
     const parts = signature.split(', ');
     const hashPart = parts.find(p => p.startsWith('sha256='));
     const timestampPart = parts.find(p => p.startsWith('t='));
     
+    console.log(`DEBUG: Hash part: "${hashPart}"`);
+    console.log(`DEBUG: Timestamp part: "${timestampPart}"`);
+    
     if (!hashPart || !timestampPart) {
-      console.log('Invalid Ghost signature format');
+      console.log('Invalid Ghost signature format - missing hash or timestamp');
       return false;
     }
     
     const expectedHash = hashPart.replace('sha256=', '');
     const timestamp = timestampPart.replace('t=', '');
     
+    console.log(`DEBUG: Expected hash: "${expectedHash}"`);
+    console.log(`DEBUG: Timestamp: "${timestamp}"`);
+    
     // Ghost signs the payload as: body + timestamp
     const payload = body + timestamp;
+    console.log(`DEBUG: Payload to sign: "${payload.substring(0, 100)}..."`);
     
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
@@ -73,6 +84,8 @@ const verifyGhostSignature = async (signature, body, secret) => {
     const computedHash = Array.from(new Uint8Array(signature_bytes))
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
+    
+    console.log(`DEBUG: Computed hash: "${computedHash}"`);
     
     const isValid = computedHash === expectedHash;
     console.log(`Ghost signature validation: ${isValid ? 'SUCCESS' : 'FAILED'}`);
@@ -406,18 +419,27 @@ const handlePost = async (request, env) => {
     // Extract email and determine status based on Ghost webhook event or direct format
     let email, status = 'confirmed', additionalData = {};
     
-    if (body.member && body.member.email) {
+    // Handle different Ghost webhook formats
+    let member = null;
+    if (body.member) {
+      // Check for both formats: direct member data or member.current structure
+      member = body.member.current || body.member;
+    }
+    
+    if (member && member.email) {
       // Ghost webhook format - determine status based on member data and context
-      email = body.member.email;
+      email = member.email;
+      
+      console.log(`DEBUG: Processing Ghost member data:`, JSON.stringify(member, null, 2));
       
       // Determine status based on Ghost webhook context
-      if (body.member.status === 'free' || body.member.status === 'paid') {
+      if (member.status === 'free' || member.status === 'paid') {
         // Member is active (added or updated to active status)
         status = 'confirmed';
-      } else if (body.member.status === 'comped') {
+      } else if (member.status === 'comped') {
         // Complimentary member
         status = 'confirmed';
-      } else if (body.member.deleted || body.member.status === 'cancelled') {
+      } else if (member.deleted || member.status === 'cancelled') {
         // Member was deleted or cancelled
         status = 'unsubscribed';
       } else {
@@ -431,7 +453,7 @@ const handlePost = async (request, env) => {
         status = 'unsubscribed';
       } else if (ghostEvent === 'member.added' || ghostEvent === 'member.updated') {
         // For added/updated, check if they're actually subscribed
-        if (body.member.subscribed === false) {
+        if (member.subscribed === false) {
           status = 'unsubscribed';
         } else {
           status = 'confirmed';
@@ -439,11 +461,13 @@ const handlePost = async (request, env) => {
       }
       
       additionalData = {
-        name: body.member.name,
-        ghost_status: body.member.status,
+        name: member.name,
+        ghost_status: member.status,
         ghost_event: ghostEvent,
-        subscribed: body.member.subscribed,
-        source: 'ghost-webhook'
+        subscribed: member.subscribed,
+        source: 'ghost-webhook',
+        ghost_uuid: member.uuid,
+        ghost_id: member.id
       };
       
       console.log(`Processing Ghost webhook (${ghostEvent}) for member: ${email}, status: ${status}`);
