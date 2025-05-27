@@ -1,0 +1,15 @@
+name = "sparkloop-worker"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[env.production]
+routes = [
+  "joshweaver.com/sparkloop/*"
+]
+
+[[env.production.kv_namespaces]]
+binding = "SUBSCRIBER_LOGS"
+id = "511107bc8e17493a81e9f02cd99efd58"
+
+# Environment variables (set these using wrangler secret put)
+# SPARKLOOP_API_KEY - Your SparkLoop API key 
